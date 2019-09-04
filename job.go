@@ -32,8 +32,11 @@ type Job struct {
 }
 
 type JobBuild struct {
-	Number int64
-	URL    string
+	Number   int64
+	URL      string
+	QueueID  int64
+	Result   string
+	Building bool
 }
 
 type InnerJob struct {
@@ -73,17 +76,17 @@ type JobResponse struct {
 		IconUrl       string `json:"iconUrl"`
 		Score         int64  `json:"score"`
 	} `json:"healthReport"`
-	InQueue               bool       `json:"inQueue"`
-	KeepDependencies      bool       `json:"keepDependencies"`
-	LastBuild             JobBuild   `json:"lastBuild"`
-	LastCompletedBuild    JobBuild   `json:"lastCompletedBuild"`
-	LastFailedBuild       JobBuild   `json:"lastFailedBuild"`
-	LastStableBuild       JobBuild   `json:"lastStableBuild"`
-	LastSuccessfulBuild   JobBuild   `json:"lastSuccessfulBuild"`
-	LastUnstableBuild     JobBuild   `json:"lastUnstableBuild"`
-	LastUnsuccessfulBuild JobBuild   `json:"lastUnsuccessfulBuild"`
-	Name                  string     `json:"name"`
-	NextBuildNumber       int64      `json:"nextBuildNumber"`
+	InQueue               bool     `json:"inQueue"`
+	KeepDependencies      bool     `json:"keepDependencies"`
+	LastBuild             JobBuild `json:"lastBuild"`
+	LastCompletedBuild    JobBuild `json:"lastCompletedBuild"`
+	LastFailedBuild       JobBuild `json:"lastFailedBuild"`
+	LastStableBuild       JobBuild `json:"lastStableBuild"`
+	LastSuccessfulBuild   JobBuild `json:"lastSuccessfulBuild"`
+	LastUnstableBuild     JobBuild `json:"lastUnstableBuild"`
+	LastUnsuccessfulBuild JobBuild `json:"lastUnsuccessfulBuild"`
+	Name                  string   `json:"name"`
+	NextBuildNumber       int64    `json:"nextBuildNumber"`
 	Property              []struct {
 		ParameterDefinitions []ParameterDefinition `json:"parameterDefinitions"`
 	} `json:"property"`
@@ -193,7 +196,7 @@ func (j *Job) GetAllBuildIds() ([]JobBuild, error) {
 	var buildsResp struct {
 		Builds []JobBuild `json:"allBuilds"`
 	}
-	_, err := j.Jenkins.Requester.GetJSON(j.Base, &buildsResp, map[string]string{"tree": "allBuilds[number,url]"})
+	_, err := j.Jenkins.Requester.GetJSON(j.Base, &buildsResp, map[string]string{"tree": "allBuilds[number,url,building,queueId,result]"})
 	if err != nil {
 		return nil, err
 	}
