@@ -16,13 +16,16 @@ package gojenkins
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"mime/multipart"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -59,74 +62,75 @@ type Requester struct {
 	SslVerify bool
 }
 
-func (r *Requester) SetCrumb(ar *APIRequest) error {
+func (r *Requester) SetCrumb(ctx context.Context, ar *APIRequest) error {
 	crumbData := map[string]string{}
-	response, _ := r.GetJSON("/crumbIssuer/api/json", &crumbData, nil)
+	response, _ := r.GetJSON(ctx, "/crumbIssuer/api/json", &crumbData, nil)
 
 	if response.StatusCode == 200 && crumbData["crumbRequestField"] != "" {
 		ar.SetHeader(crumbData["crumbRequestField"], crumbData["crumb"])
+		ar.SetHeader("Cookie", response.Header.Get("set-cookie"))
 	}
 
 	return nil
 }
 
-func (r *Requester) PostJSON(endpoint string, payload io.Reader, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
+func (r *Requester) PostJSON(ctx context.Context, endpoint string, payload io.Reader, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
 	ar := NewAPIRequest("POST", endpoint, payload)
-	if err := r.SetCrumb(ar); err != nil {
+	if err := r.SetCrumb(ctx, ar); err != nil {
 		return nil, err
 	}
 	ar.SetHeader("Content-Type", "application/x-www-form-urlencoded")
 	ar.Suffix = "api/json"
-	return r.Do(ar, &responseStruct, querystring)
+	return r.Do(ctx, ar, &responseStruct, querystring)
 }
 
-func (r *Requester) Post(endpoint string, payload io.Reader, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
+func (r *Requester) Post(ctx context.Context, endpoint string, payload io.Reader, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
 	ar := NewAPIRequest("POST", endpoint, payload)
-	if err := r.SetCrumb(ar); err != nil {
+	if err := r.SetCrumb(ctx, ar); err != nil {
 		return nil, err
 	}
 	ar.SetHeader("Content-Type", "application/x-www-form-urlencoded")
 	ar.Suffix = ""
-	return r.Do(ar, &responseStruct, querystring)
+	return r.Do(ctx, ar, &responseStruct, querystring)
 }
 
-func (r *Requester) PostFiles(endpoint string, payload io.Reader, responseStruct interface{}, querystring map[string]string, files []string) (*http.Response, error) {
+func (r *Requester) PostFiles(ctx context.Context, endpoint string, payload io.Reader, responseStruct interface{}, querystring map[string]string, files []string) (*http.Response, error) {
 	ar := NewAPIRequest("POST", endpoint, payload)
-	if err := r.SetCrumb(ar); err != nil {
+	if err := r.SetCrumb(ctx, ar); err != nil {
 		return nil, err
 	}
-	return r.Do(ar, &responseStruct, querystring, files)
+	return r.Do(ctx, ar, &responseStruct, querystring, files)
 }
 
-func (r *Requester) PostXML(endpoint string, xml string, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
+func (r *Requester) PostXML(ctx context.Context, endpoint string, xml string, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
 	payload := bytes.NewBuffer([]byte(xml))
 	ar := NewAPIRequest("POST", endpoint, payload)
-	if err := r.SetCrumb(ar); err != nil {
+	if err := r.SetCrumb(ctx, ar); err != nil {
 		return nil, err
 	}
-	ar.SetHeader("Content-Type", "application/xml")
+	ar.SetHeader("Content-Type", "application/xml;charset=utf-8")
 	ar.Suffix = ""
-	return r.Do(ar, &responseStruct, querystring)
+	return r.Do(ctx, ar, &responseStruct, querystring)
 }
 
-func (r *Requester) GetJSON(endpoint string, responseStruct interface{}, query map[string]string) (*http.Response, error) {
+func (r *Requester) GetJSON(ctx context.Context, endpoint string, responseStruct interface{}, query map[string]string) (*http.Response, error) {
 	ar := NewAPIRequest("GET", endpoint, nil)
 	ar.SetHeader("Content-Type", "application/json")
 	ar.Suffix = "api/json"
-	return r.Do(ar, &responseStruct, query)
+	return r.Do(ctx, ar, &responseStruct, query)
 }
 
-func (r *Requester) GetXML(endpoint string, responseStruct interface{}, query map[string]string) (*http.Response, error) {
+func (r *Requester) GetXML(ctx context.Context, endpoint string, responseStruct interface{}, query map[string]string) (*http.Response, error) {
 	ar := NewAPIRequest("GET", endpoint, nil)
 	ar.SetHeader("Content-Type", "application/xml")
 	ar.Suffix = ""
-	return r.Do(ar, responseStruct, query)
+	return r.Do(ctx, ar, responseStruct, query)
 }
 
-func (r *Requester) Get(endpoint string, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
+func (r *Requester) Get(ctx context.Context, endpoint string, responseStruct interface{}, querystring map[string]string) (*http.Response, error) {
 	ar := NewAPIRequest("GET", endpoint, nil)
 	ar.Suffix = ""
-	return r.Do(ar, responseStruct, querystring)
+	return r.Do(ctx, ar, responseStruct, querystring)
 }
 
 func (r *Requester) SetClient(client *http.Client) *Requester {
@@ -134,7 +138,7 @@ func (r *Requester) SetClient(client *http.Client) *Requester {
 	return r
 }
 
-//Add auth on redirect if required.
+// Add auth on redirect if required.
 func (r *Requester) redirectPolicyFunc(req *http.Request, via []*http.Request) error {
 	if r.BasicAuth != nil {
 		req.SetBasicAuth(r.BasicAuth.Username, r.BasicAuth.Password)
@@ -142,7 +146,7 @@ func (r *Requester) redirectPolicyFunc(req *http.Request, via []*http.Request) e
 	return nil
 }
 
-func (r *Requester) Do(ar *APIRequest, responseStruct interface{}, options ...interface{}) (*http.Response, error) {
+func (r *Requester) Do(ctx context.Context, ar *APIRequest, responseStruct interface{}, options ...interface{}) (*http.Response, error) {
 	if !strings.HasSuffix(ar.Endpoint, "/") && ar.Method != "POST" {
 		ar.Endpoint += "/"
 	}
@@ -202,14 +206,14 @@ func (r *Requester) Do(ar *APIRequest, responseStruct interface{}, options ...in
 		if err = writer.Close(); err != nil {
 			return nil, err
 		}
-		req, err = http.NewRequest(ar.Method, URL.String(), body)
+		req, err = http.NewRequestWithContext(ctx, ar.Method, URL.String(), body)
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 	} else {
 
-		req, err = http.NewRequest(ar.Method, URL.String(), ar.Payload)
+		req, err = http.NewRequestWithContext(ctx, ar.Method, URL.String(), ar.Payload)
 		if err != nil {
 			return nil, err
 		}
@@ -226,6 +230,13 @@ func (r *Requester) Do(ar *APIRequest, responseStruct interface{}, options ...in
 	if response, err := r.Client.Do(req); err != nil {
 		return nil, err
 	} else {
+		if v := ctx.Value("debug"); v != nil {
+			dump, err := httputil.DumpResponse(response, true)
+			if err != nil {
+				log.Fatal(err)
+			}
+			log.Printf("DEBUG %q\n", dump)
+		}
 		errorText := response.Header.Get("X-Error")
 		if errorText != "" {
 			return nil, errors.New(errorText)

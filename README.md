@@ -15,70 +15,66 @@ These are some of the features that are currently implemented:
 * Ability to query Jobs, and manipulate them.
 * Get Plugins, Builds, Artifacts, Fingerprints
 * Validate Fingerprints of Artifacts
+* Create and Delete Users
 * Get Current Queue, Cancel Tasks
+* Create and Revoke API Tokens
 * etc. For all methods go to GoDoc Reference.
 
 ## Installation
 
     go get github.com/bndr/gojenkins
 
+## CLI
+
+For users that would like CLI based on gojenkins, follow the steps below:
+
+   ```
+   $ cd cli/jenkinsctl
+   $ make
+   ```
 ## Usage
 
 ```go
 
-import "github.com/bndr/gojenkins"
+import (
+  "github.com/bndr/gojenkins"
+  "context"
+  "time"
+  "fmt"
+)
 
+ctx := context.Background()
 jenkins := gojenkins.CreateJenkins(nil, "http://localhost:8080/", "admin", "admin")
 // Provide CA certificate if server is using self-signed certificate
 // caCert, _ := ioutil.ReadFile("/tmp/ca.crt")
 // jenkins.Requester.CACert = caCert
-_, err := jenkins.Init()
+_, err := jenkins.Init(ctx)
 
 
 if err != nil {
   panic("Something Went Wrong")
 }
 
-build, err := jenkins.GetJob("job_name")
+job, err := jenkins.GetJob(ctx, "#jobname")
 if err != nil {
-  panic("Job Does Not Exist")
+  panic(err)
+}
+queueid, err := job.InvokeSimple(ctx, params) // or  jenkins.BuildJob(ctx, "#jobname", params)
+if err != nil {
+  panic(err)
+}
+build, err := jenkins.GetBuildFromQueueID(ctx, job, queueid)
+if err != nil {
+  panic(err)
 }
 
-lastSuccessBuild, err := build.GetLastSuccessfulBuild()
-if err != nil {
-  panic("Last SuccessBuild does not exist")
+// Wait for build to finish
+for build.IsRunning(ctx) {
+  time.Sleep(5000 * time.Millisecond)
+  build.Poll(ctx)
 }
 
-duration := lastSuccessBuild.GetDuration()
-
-job, err := jenkins.GetJob("jobname")
-
-if err != nil {
-  panic("Job does not exist")
-}
-
-job.Rename("SomeotherJobName")
-
-configString := `<?xml version='1.0' encoding='UTF-8'?>
-<project>
-  <actions/>
-  <description></description>
-  <keepDependencies>false</keepDependencies>
-  <properties/>
-  <scm class="hudson.scm.NullSCM"/>
-  <canRoam>true</canRoam>
-  <disabled>false</disabled>
-  <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
-  <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
-  <triggers class="vector"/>
-  <concurrentBuild>false</concurrentBuild>
-  <builders/>
-  <publishers/>
-  <buildWrappers/>
-</project>`
-
-j.CreateJob(configString, "someNewJobsName")
-
+fmt.Printf("build number %d with result: %v\n", build.GetBuildNumber(), build.GetResult())
 
 ```
 
@@ -90,20 +86,20 @@ For all of the examples below first create a jenkins object
 ```go
 import "github.com/bndr/gojenkins"
 
-jenkins, _ := gojenkins.CreateJenkins(nil, "http://localhost:8080/", "admin", "admin").Init()
+jenkins, _ := gojenkins.CreateJenkins(nil, "http://localhost:8080/", "admin", "admin").Init(ctx)
 ```
 
 or if you don't need authentication:
 
 ```go
-jenkins, _ := gojenkins.CreateJenkins(nil, "http://localhost:8080/").Init()
+jenkins, _ := gojenkins.CreateJenkins(nil, "http://localhost:8080/").Init(ctx)
 ```
 
 you can also specify your own `http.Client` (for instance, providing your own SSL configurations):
 
 ```go
 client := &http.Client{ ... }
-jenkins, := gojenkins.CreateJenkins(client, "http://localhost:8080/").Init()
+jenkins, := gojenkins.CreateJenkins(client, "http://localhost:8080/").Init(ctx)
 ```
 
 By default, `gojenkins` will use the `http.DefaultClient` if none is passed into the `CreateJenkins()`
@@ -112,13 +108,13 @@ function.
 ### Check Status of all nodes
 
 ```go
-nodes := jenkins.GetAllNodes()
+nodes := jenkins.GetAllNodes(ctx)
 
 for _, node := range nodes {
 
   // Fetch Node Data
-  node.Poll()
-	if node.IsOnline() {
+  node.Poll(ctx)
+	if node.IsOnline(ctx) {
 		fmt.Println("Node is Online")
 	}
 }
@@ -129,7 +125,7 @@ for _, node := range nodes {
 
 ```go
 jobName := "someJob"
-builds, err := jenkins.GetAllBuildIds(jobName)
+builds, err := jenkins.GetAllBuildIds(ctx, jobName)
 
 if err != nil {
   panic(err)
@@ -137,26 +133,26 @@ if err != nil {
 
 for _, build := range builds {
   buildId := build.Number
-  data, err := jenkins.GetBuild(jobName, buildId)
+  data, err := jenkins.GetBuild(ctx, jobName, buildId)
 
   if err != nil {
     panic(err)
   }
 
-	if "SUCCESS" == data.GetResult() {
+	if "SUCCESS" == data.GetResult(ctx) {
 		fmt.Println("This build succeeded")
 	}
 }
 
 // Get Last Successful/Failed/Stable Build for a Job
-job, err := jenkins.GetJob("someJob")
+job, err := jenkins.GetJob(ctx, "someJob")
 
 if err != nil {
   panic(err)
 }
 
-job.GetLastSuccessfulBuild()
-job.GetLastStableBuild()
+job.GetLastSuccessfulBuild(ctx)
+job.GetLastStableBuild(ctx)
 
 ```
 
@@ -164,10 +160,10 @@ job.GetLastStableBuild()
 
 ```go
 
-tasks := jenkins.GetQueue()
+tasks := jenkins.GetQueue(ctx)
 
 for _, task := range tasks {
-	fmt.Println(task.GetWhy())
+	fmt.Println(task.GetWhy(ctx))
 }
 
 ```
@@ -176,13 +172,13 @@ for _, task := range tasks {
 
 ```go
 
-view, err := jenkins.CreateView("test_view", gojenkins.LIST_VIEW)
+view, err := jenkins.CreateView(ctx, "test_view", gojenkins.LIST_VIEW)
 
 if err != nil {
   panic(err)
 }
 
-status, err := view.AddJob("jobName")
+status, err := view.AddJob(ctx, "jobName")
 
 if status != nil {
   fmt.Println("Job has been added to view")
@@ -195,13 +191,13 @@ if status != nil {
 ```go
 
 // Create parent folder
-pFolder, err := jenkins.CreateFolder("parentFolder")
+pFolder, err := jenkins.CreateFolder(ctx, "parentFolder")
 if err != nil {
   panic(err)
 }
 
 // Create child folder in parent folder
-cFolder, err := jenkins.CreateFolder("childFolder", pFolder.GetName())
+cFolder, err := jenkins.CreateFolder(ctx, "childFolder", pFolder.GetName())
 if err != nil {
   panic(err)
 }
@@ -225,7 +221,7 @@ configString := `<?xml version='1.0' encoding='UTF-8'?>
   <buildWrappers/>
 </project>`
 
-job, err := jenkins.CreateJobInFolder(configString, "jobInFolder", pFolder.GetName(), cFolder.GetName())
+job, err := jenkins.CreateJobInFolder(ctx, configString, "jobInFolder", pFolder.GetName(), cFolder.GetName())
 if err != nil {
   panic(err)
 }
@@ -240,9 +236,9 @@ if job != nil {
 
 ```go
 
-job, _ := jenkins.GetJob("job")
-build, _ := job.GetBuild(1)
-artifacts := build.GetArtifacts()
+job, _ := jenkins.GetJob(ctx, "job")
+build, _ := job.GetBuild(ctx, 1)
+artifacts := build.GetArtifacts(ctx)
 
 for _, a := range artifacts {
 	a.SaveToDir("/tmp")
@@ -254,12 +250,51 @@ for _, a := range artifacts {
 
 ```go
 
-job, _ := jenkins.GetJob("job")
+job, _ := jenkins.GetJob(ctx, "job")
 job.Poll()
 
-build, _ := job.getBuild(1)
+build, _ := job.getBuild(ctx, 1)
 build.Poll()
 
+```
+
+### Create and Delete Users
+
+```go
+// Create user
+user, err := jenkins.CreateUser(ctx, "username", "password", "fullname", "user@email.com")
+if err != nil {
+  log.Fatal(err)
+}
+// Delete User
+err = user.Delete()
+if err != nil {
+  log.Fatal(err)
+}
+// Delete user not created by gojenkins
+err = jenkins.DeleteUser("username")
+```
+
+## Create and Revoke API Tokens
+
+```go
+// Create a token for admin user
+token, err := jenkins.GenerateAPIToken(ctx, "TestToken")
+if err != nil {
+  log.Fatal(err)
+}
+
+// Set Jenkins client to use new API token
+jenkins.Requester.BasicAuth.Password = token.Value
+
+// Revoke token that was just created
+token.Revoke()
+
+// Revoke all tokens for admin user
+err = jenkins.RevokeAllAPITokens(ctx)
+if err != nil {
+  log.Fatal(err)
+}
 ```
 
 ## Testing
@@ -275,7 +310,6 @@ All Contributions are welcome. The todo list is on the bottom of this README. Fe
 Although the basic features are implemented there are many optional features that are on the todo list.
 
 * Kerberos Authentication
-* CLI Tool
 * Rewrite some (all?) iterators with channels
 
 ## LICENSE
