@@ -33,8 +33,11 @@ type Job struct {
 }
 
 type JobBuild struct {
-	Number int64
-	URL    string
+	Number   int64
+	URL      string
+	QueueID  int64
+	Result   string
+	Building bool
 }
 
 type InnerJob struct {
@@ -210,7 +213,7 @@ func (j *Job) GetAllBuildIds(ctx context.Context) ([]JobBuild, error) {
 	var buildsResp struct {
 		Builds []JobBuild `json:"allBuilds"`
 	}
-	_, err := j.Jenkins.Requester.GetJSON(ctx, j.Base, &buildsResp, map[string]string{"tree": "allBuilds[number,url]"})
+	_, err := j.Jenkins.Requester.GetJSON(ctx, j.Base, &buildsResp, map[string]string{"tree": "allBuilds[number,url,building,queueId,result]"})
 	if err != nil {
 		return nil, err
 	}
